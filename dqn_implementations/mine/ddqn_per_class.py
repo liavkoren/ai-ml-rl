@@ -23,7 +23,7 @@ import gym
 import numpy as np
 
 from SumTree import SumTree
-
+from dqn_base_class import AgentBaseClass
 
 date_formater = '%Y-%m-%d__%H--%M--%S'  # eg: '2018-05-10__13--57--47'
 
@@ -37,11 +37,16 @@ class Memory:
 
     def __attrs_post_init__(self):
         self.sumtree = SumTree(capacity=self.size)
+        self._len = 0
+
+    def __len__(self):
+        return self._len
 
     def _td_error_to_priority(self, td_error):
         return (td_error + self.epsilon) ** self.alpha
 
     def store(self, td_error, transition):
+        self._len += 1
         priority = self._td_error_to_priority(td_error)
         self.sumtree.add(priority, transition)
 
@@ -95,7 +100,8 @@ class PrioritizedExperienceReplayDDQN:
         self.target_q_history = []
         self.online_q_history = []
         self.mean_td_errors = []
-        self.episode_lengths = []
+        self.transitions_per_episode = []
+        self.fields_to_log = ['episode_rewards', 'episode_traces', 'target_q_history', 'online_q_history', 'mean_td_errors', 'episode_lengths']
         self.steps = 0
         self.env = gym.make(self.env_name)
         self.state_shape = self.env.observation_space.shape
@@ -138,11 +144,11 @@ class PrioritizedExperienceReplayDDQN:
                 'target_q_history': np.array(self.target_q_history).tolist(),
                 'online_q_history': np.array(self.online_q_history).tolist(),
                 'mean_td_errors': np.array(self.mean_td_errors).tolist(),
-                'episode_lengths': np.array(self.episode_lengths).tolist(),
+                'transitions_per_episode': np.array(self.transitions_per_episode).tolist(),
                 'time': datetime.now().strftime(date_formater)
             }
             json.dump(data, file)
-        print(f'Saved data to {file_name}')
+        # print(f'Saved data to {file_name}')
 
     def init_memory(self):
         self.memory = Memory(size=self.memory_size, batch_size=self.batch_size)
@@ -217,6 +223,7 @@ class PrioritizedExperienceReplayDDQN:
                 self._save_data()
 
             episode_len = 0
+            memory_len_at_episode_start = len(self.memory)
             while not episode_done:
                 episode_len += 1
                 EPSILON = self.epsilon_min + (self.epsilon_max - self.epsilon_min) * math.exp(-self.annealing_const * self.steps)
@@ -250,8 +257,13 @@ class PrioritizedExperienceReplayDDQN:
                         mean_100 = sum(self.episode_rewards[-100:]) / 100
                         print(f'Episode: {episode_count}, steps: {self.steps}, reward: {episode_reward}, 10-episode mean reward: {mean_10}, 100-episode mean reward: {mean_100} ', end='\r', flush=True)
                     self.episode_rewards.append(episode_reward)
+                    self.transitions_per_episode.append(len(self.memory) - memory_len_at_episode_start)
         if self.save_every:
             self._save_data()
+
+
+class RefactoredPERDQN(AgentBaseClass):
+    pass
 
 
 if __name__ == '__main__':
