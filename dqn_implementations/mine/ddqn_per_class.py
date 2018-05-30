@@ -54,13 +54,11 @@ class Memory:
         # https://github.com/jaara/AI-blog/blob/master/Seaquest-DDQN-PER.py#L102
         batch = []
         segment_size = self.sumtree.total() // self.batch_size
-
         for index in range(self.batch_size):
             a = segment_size * index
             b = segment_size * (index + 1)
             s = random.uniform(a, b)
-            idx, p, data = self.sumtree.get(s)
-            batch.append((idx, data))
+            batch.append(self.sumtree.get(s))  # a list of (idx, p, data) tuples
         return batch
 
     def update(self, idx, td_error):
@@ -93,6 +91,7 @@ class PrioritizedExperienceReplayDDQN:
     annealing_const = attr.ib(default=.001)  # aka lambda, how quickly epsilon anneals down to min value
     data_directory = attr.ib('data')
     random_init_steps = attr.ib(default=1000)  # How many random transitions to observe before starting to learn.
+    use_importance_weights = attr.ib(default=False)
 
     def __attrs_post_init__(self):
         self.episode_rewards = []
@@ -170,8 +169,8 @@ class PrioritizedExperienceReplayDDQN:
         print('Finished initializing memory with random agent.')
 
     def replay(self, verbose=0):
-        batch = self.memory.sample()  # A list of (idx, observation) tuples
-        observations = [b[1] for b in batch]
+        batch = self.memory.sample()  # A list of (idx, prob, observation) tuples
+        observations = [observe[2] for observe in batch]
 
         # unpack all the replay memories into arrays:
         # transition is: (state, action, reward, state', is_done)
@@ -195,9 +194,19 @@ class PrioritizedExperienceReplayDDQN:
         non_terminal_actions = transition_actions[non_terminal_mask]
         y_ = self.target_net.predict(states_)  # (observations x num-actions)
         y[non_terminal_mask, non_terminal_actions] = rewards[non_terminal_mask] + self.discount_rate * y_[non_terminal_mask, best_actions]
-        self.online_net.fit(states, y, batch_size=self.memory.batch_size, epochs=1, verbose=verbose)  # REMEBER, Q is a func from (state, action) pairs to values.
 
-        memory_indices = [b[0] for b in batch]
+        if self.use_importance_weights:
+            # import pdb; pdb.set_trace()
+            priorities = np.array([observe[1] for observe in batch])
+            probabilities = priorities / sum(priorities)
+            BETA = 0.4
+            weights = (self.memory_size * probabilities) ** -BETA
+            weights = weights / weights.max()
+            self.online_net.fit(states, y, batch_size=self.memory.batch_size, epochs=1, verbose=verbose, sample_weight=weights)  # REMEBER, Q is a func from (state, action) pairs to values.
+        else:
+            self.online_net.fit(states, y, batch_size=self.memory.batch_size, epochs=1, verbose=verbose)  # REMEBER, Q is a func from (state, action) pairs to values.
+
+        memory_indices = [observe[0] for observe in batch]
         target_predictions = self.target_net.predict(states_)[range(self.batch_size), online_predicted_actions_]
         online_predictions = self.online_net.predict(states)[range(self.batch_size), transition_actions]
 
@@ -219,7 +228,7 @@ class PrioritizedExperienceReplayDDQN:
             self.target_q_history.append(self.Q_val_one(self.target_net, state).max())
             self.online_q_history.append(self.Q_val_one(self.online_net, state).max())
 
-            if self.save_every and self.steps % self.save_every == 0:
+            if self.save_every and episode_count % self.save_every == 0:
                 self._save_data()
 
             episode_len = 0

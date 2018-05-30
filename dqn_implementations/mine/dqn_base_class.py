@@ -1,6 +1,7 @@
 from copy import copy
 from datetime import datetime
 import json
+from logging import getLogger
 import os
 import pickle
 
@@ -8,14 +9,15 @@ import attr
 import gym
 import numpy as np
 
-
 date_formater = '%Y-%m-%d__%H--%M--%S'  # eg: '2018-05-10__13--57--47'
+logger = getLogger(__name__)
 
 
 @attr.s
 class AgentBaseClass:
     env_name = attr.ib()
-
+    online_net = attr.ib()
+    target_net = attr.ib()
     memory_size = attr.ib(default=int(1e5))
     batch_size = attr.ib(default=64)
     save_every = attr.ib(default=500)
@@ -30,17 +32,16 @@ class AgentBaseClass:
     annealing_const = attr.ib(default=.001)  # aka lambda, how quickly epsilon anneals down to min value
     data_directory = attr.ib('data')
     random_init_steps = attr.ib(default=1000)
-    MemoryClass = attr.ib()
-    online_net = attr.ib()
-    target_net = attr.ib()
 
     def __attrs_post_init__(self):
+        self.memory = None
         self.episode_rewards = []
         self.episode_traces = []
         self.target_q_history = []
         self.online_q_history = []
         self.mean_td_errors = []
         self.transitions_per_episode = []
+        self.fields_to_log = ['episode_rewards', 'episode_traces', 'target_q_history', 'online_q_history', 'mean_td_errors', 'episode_lengths', 'transitions_per_episode']
         self.steps = 0
         self.env = gym.make(self.env_name)
         self.state_shape = self.env.observation_space.shape
@@ -53,11 +54,7 @@ class AgentBaseClass:
             self._save_self()
             now = datetime.now()
             self.data_file_name = self.env_name + now.strftime(date_formater) + 'history.data'
-
-    def init_memory(self):
-        self.memory = self.MemoryClass(self.memory_size, self.batch_size)
-        if not self.random_init_steps:
-            return
+            print(f'Save dir is: {self.save_dir}')
 
     def Q_val_one(self, net, state):
         """ Given a net and a single state, predict values for the state. """
@@ -86,15 +83,30 @@ class AgentBaseClass:
         self.online_net.save(os.path.join(self.save_dir, 'online-net.ht'))
         self.target_net.save(os.path.join(self.save_dir, 'target-net.ht'))
         file_name = os.path.join(self.save_dir, 'history.data')
+
+        if not self.fields_to_log:
+            logger.warning("Didn't find any fields to log!")
+            return
+
+        data = {}
+        for field in self.fields_to_log:
+            field_data = getattr(self, field, None)
+            if isinstance(field_data, list):
+                field_data = np.array(field_data).tolist()
+            data[field] = field_data
+        data['time'] = datetime.now().strftime(date_formater)
         with open(file_name, 'w+') as file:
-            data = {
-                'episode_rewards': np.array(self.episode_rewards).tolist(),
-                'episode_traces': np.array(self.episode_traces).tolist(),
-                'target_q_history': np.array(self.target_q_history).tolist(),
-                'online_q_history': np.array(self.online_q_history).tolist(),
-                'mean_td_errors': np.array(self.mean_td_errors).tolist(),
-                'episode_lengths': np.array(self.episode_lengths).tolist(),
-                'time': datetime.now().strftime(date_formater)
-            }
             json.dump(data, file)
-        print(f'Saved data to {file_name}')
+
+    def init_memory(self):
+        raise NotImplemented
+
+    def replay(self):
+        raise NotImplemented
+
+    def run(self):
+        raise NotImplemented
+
+    def cleanup(self):
+        # TODO: handle interupts.
+        self.env.close()
