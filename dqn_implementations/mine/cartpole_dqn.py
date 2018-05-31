@@ -5,6 +5,7 @@ https://github.com/jaara/AI-blog/blob/master/CartPole-basic.py
 
 from collections import deque
 import json
+import os
 import random
 
 import gym
@@ -18,8 +19,8 @@ class Brain:
 
     def _create_model(self):
         model = keras.models.Sequential()
-        model.add(keras.layers.Dense(output_dim=64, activation='relu', input_dim=STATE_SIZE))
-        model.add(keras.layers.Dense(output_dim=ACTION_COUNT, activation='linear'))
+        model.add(keras.layers.Dense(units=64, activation='relu', input_dim=STATE_SIZE))
+        model.add(keras.layers.Dense(units=ACTION_COUNT, activation='linear'))
         opt = keras.optimizers.Adam()
         model.compile(loss='mse', optimizer=opt)
         return model
@@ -55,7 +56,7 @@ MEMORY_SIZE = 1e5
 BATCH_SIZE = 64
 GAMMA = .99
 EPSILON_MAX = 1.0
-EPSILON_MIN = .01
+EPSILON_MIN = .1
 EPSILON = EPSILON_MAX
 STATE_SIZE = None
 ACTION_COUNT = None
@@ -85,10 +86,10 @@ class Agent:
             terminal_state = np.zeros(STATE_SIZE)
 
             states = np.array([tup[0] for tup in batch])
-            predict = self.brain.predict(states)  # (batch_size x action_count)
+            predict = self.brain.predict(states)  # (batch_size x state_shape)
 
             states_ = np.array([tup[3] if tup[3] is not None else terminal_state for tup in batch])
-            predict_ = self.brain.predict(states_)  # (batch_size x action_count)
+            predict_ = self.brain.predict(states_)  # (batch_size x state_shape)
 
             # why... SHOULD a Q Network converge at all???
             x = np.zeros((len(batch), STATE_SIZE))
@@ -96,6 +97,33 @@ class Agent:
             y = np.zeros((len(batch), ACTION_COUNT))
             for idx, sample in enumerate(batch):
                 state, action, reward, state_, is_done = sample
+                """
+                If target = predict_[idx] it totally breaks. Related to the
+                divergence issues paper DQN paper talks about?
+
+                OKAY: this is a straight implementation of bellman:
+                target := Q(s, a) = r + gamma * Q(s', a')
+                The confusing thing here is that the iterative update only
+                applies to argmax. This isn't clear to me at all from the
+                psuedocode.
+
+                '...Bellman's formula means that for a sample (s, r, a, s’) we
+                will update the network’s weights so that its output is closer
+                to the target.
+
+                But when we recall our network architecture, we see, that it has
+                multiple outputs, one for each action.
+
+                We therefore have to supply a target for each of the outputs.
+                But we want to adjust the ouptut of the network for only the one
+                action which is part of the sample. *For the other actions, we
+                want the output to stay the same. So, the solution is simply to
+                pass the current values as targets, which we can get by a single
+                forward propagation.*'
+
+                -> USING predict is a way to make the gradient zero for the non-chosen
+                action(s). <-
+                """
                 target = predict[idx]
                 if state_ is None:
                     target[action] = reward
@@ -104,12 +132,13 @@ class Agent:
                 x[idx] = state
                 y[idx] = target
 
-            self.brain.train(x, y)
+            # self.brain.train(x, y)
+            self.brain.train(states, y)
 
 
 class Environment:
     def __init__(self, name):
-        self.env = gym.make(name)
+        self.env = gym.make(name).env
         global STATE_SIZE, ACTION_COUNT
         STATE_SIZE = self.env.observation_space.shape[0]
         ACTION_COUNT = self.env.action_space.n
@@ -135,15 +164,22 @@ class Environment:
 
 if __name__ == '__main__':
     PROBLEM = 'CartPole-v0'
+    # PROBLEM = 'MountainCar-v0'
     env = Environment(PROBLEM)
     agent = Agent()
     time = 0
     reward_history = []
-    while True:
-        reward_history.append(env.run_episode(agent, render=True))
-        time += 1
-        if time % 10 == 0:
-            with open('reward_hisory', 'w') as file:
-                file.write(json.dumps(reward_history))
-        if time % 10 == 0:
-            print(time)
+    try:
+        if os.path.exists('{}.h5'.format(PROBLEM)):
+            agent.brain.model.load_weights('{}.h5'.format(PROBLEM))
+
+        while True:
+            reward_history.append(env.run_episode(agent, render=True))
+            time += 1
+            if time % 10 == 0:
+                with open('reward_hisory', 'w') as file:
+                    file.write(json.dumps(reward_history))
+            if time % 10 == 0:
+                print(time)
+    finally:
+        agent.brain.model.save('{}.h5'.format(PROBLEM))
