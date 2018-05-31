@@ -74,8 +74,24 @@ class EpsilonAgent:
             episode_reward += reward
         return episode_reward
 
-    def trials(self):
+    def get_episode_trace(self):
+        states = []
+        actions = []
+        rewards = []
+        self.env.reset()
+        is_done = False
+        while not is_done:
+            action = self.get_action()
+            reward, is_done = self.env.step(action)
+            states.append(self.env.state)
+            actions.append(action)
+            rewards.append(reward)
+            if len(states) == 100:
+                is_done = True
+                rewards[-1] = -10
+        return states, actions, rewards
 
+    def trials(self):
         for idx in range(5, 96):
             self.epsilon = idx / 100
             cumulative_rewards = 0
@@ -92,7 +108,23 @@ class EpsilonAgent:
         return self.rewards
 
 
-if __name__ == '__main__':
+def discounted_return(rewards, discount_rate=0.9):
+    total = 0
+    for idx, reward in enumerate(rewards):
+        total += discount_rate ** idx * reward
+    return total
+
+
+def reinforce(policy, step_size=0.0001, num_episodes=1000, discount_rate=0.9):
+    for episode in range(num_episodes):
+        states, actions, rewards = policy.get_episode_trace()
+        episode_reward = sum(rewards)
+        for idx, action in enumerate(actions):
+            policy.epsilon += step_size * (discount_rate ** idx) * episode_reward
+    return policy
+
+
+def plot_dynamics():
     agent = EpsilonAgent()
     data = agent.trials()
     print(data)
@@ -101,3 +133,11 @@ if __name__ == '__main__':
     y = data.values()
     plt.plot(x, y)
     plt.show()
+
+
+if __name__ == '__main__':
+    raw_policy = EpsilonAgent()
+    raw_policy.epsilon = np.random.random()
+
+    good_policy = reinforce(raw_policy)
+    print(good_policy.epsilon)
