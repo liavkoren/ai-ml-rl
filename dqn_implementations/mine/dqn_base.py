@@ -68,8 +68,7 @@ class DqnBaseClass:
         if self.render_every and episode % self.render_every == 0:
             self.env.render()
 
-    # TODO: rename to train
-    def run(self):
+    def train(self):
         raise NotImplementedError
 
     def test(self, num_episodes=500):
