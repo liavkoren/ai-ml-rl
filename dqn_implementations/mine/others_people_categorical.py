@@ -107,7 +107,7 @@ class CategoricalPolicyImprovement(object):
         """
         # Optimized by https://github.com/tudor-berariu
         offset = torch.linspace(0, ((batch_sz - 1) * self.atoms_no), batch_sz)\
-            .type(self.dtype.LT)\
+            .type(torch.long)\
             .unsqueeze(1).expand(batch_sz, self.atoms_no)
 
         m.view(-1).index_add_(0, (l + offset).view(-1),
